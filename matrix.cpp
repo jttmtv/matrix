@@ -1,10 +1,11 @@
 #include "matrix.hpp"
 #include <immintrin.h>
 #include <omp.h>
-#include <string.h>
-#include <time.h>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
 
-bool check(const matrix *A, const matrix *B)
+bool check(const matrix* A, const matrix* B)
 {
     if (!A->row || !A->col || !B->row || !B->col)
         return false;
@@ -14,7 +15,7 @@ bool check(const matrix *A, const matrix *B)
         return true;
 }
 
-void matrix_set(matrix *X)
+void matrix_set(matrix* X)
 {
     srand((unsigned)time(NULL));
     for (size_t i = 0; i < X->row; ++i)
@@ -22,19 +23,19 @@ void matrix_set(matrix *X)
             X->val[i][j] = rand() / float(RAND_MAX);
 }
 
-void memory_access(matrix *X, size_t row, size_t col)
+void memory_access(matrix* X, size_t row, size_t col)
 {
     X->row = row;
     X->col = col;
     if (row > 0 && col > 0)
     {
-        X->val = new float *[row];
+        X->val = new float* [row];
         for (size_t i = 0; i < row; ++i)
             X->val[i] = new float[col];
     }
 }
 
-void memory_free(matrix *X)
+void memory_free(matrix* X)
 {
     if (X->val)
     {
@@ -44,20 +45,20 @@ void memory_free(matrix *X)
     }
 }
 
-void matrix_clear(matrix *X)
+void matrix_clear(matrix* X)
 {
     for (size_t i = 0; i < X->row; ++i)
         memset(X->val[i], 0, sizeof(float) * X->col);
 }
 
-void matrix_transpose(const matrix *X, matrix *XT)
+void matrix_transpose(const matrix* X, matrix* XT)
 {
     for (size_t i = 0; i < X->row; ++i)
         for (size_t j = 0; j < X->col; ++j)
             XT->val[j][i] = X->val[i][j];
 }
 
-void matrix_multiplication1(const matrix *A, const matrix *B, matrix *C)
+void matrix_multiplication1(const matrix* A, const matrix* B, matrix* C)
 {
     for (size_t i = 0; i < C->row; ++i)
         for (size_t j = 0; j < C->col; ++j)
@@ -65,7 +66,7 @@ void matrix_multiplication1(const matrix *A, const matrix *B, matrix *C)
                 C->val[i][j] += A->val[i][k] * B->val[k][j];
 }
 
-void matrix_multiplication2(const matrix *A, const matrix *B, matrix *C)
+void matrix_multiplication2(const matrix* A, const matrix* B, matrix* C)
 {
     for (size_t i = 0; i < C->row; ++i)
         for (size_t j = 0; j < B->row; ++j)
@@ -73,7 +74,7 @@ void matrix_multiplication2(const matrix *A, const matrix *B, matrix *C)
                 C->val[i][k] += A->val[i][j] * B->val[j][k];
 }
 
-void matrix_multiplication3(const matrix *A, const matrix *B, matrix *C)
+void matrix_multiplication3(const matrix* A, const matrix* B, matrix* C)
 {
     size_t blocksize = 64;
     size_t i, j, k, i1, j1, k1;
@@ -86,7 +87,7 @@ void matrix_multiplication3(const matrix *A, const matrix *B, matrix *C)
                             C->val[i1][k1] += A->val[i1][j1] * B->val[j1][k1];
 }
 
-void matrix_multiplication4(const matrix *A, const matrix *B, matrix *C)
+void matrix_multiplication4(const matrix* A, const matrix* B, matrix* C)
 {
     size_t m, n, k;
     for (m = 0; m < A->row; ++m)
@@ -106,7 +107,7 @@ void matrix_multiplication4(const matrix *A, const matrix *B, matrix *C)
     }
 }
 
-void matrix_multiplication5(const matrix *A, const matrix *B, matrix *C)
+void matrix_multiplication5(const matrix* A, const matrix* B, matrix* C)
 {
     size_t m = 0, n = 0, k = 0;
     size_t M = A->row, N = B->row, K = A->col;
