@@ -58,7 +58,15 @@ void matrix_transpose(const matrix* X, matrix* XT)
             XT->val[j][i] = X->val[i][j];
 }
 
-void matrix_multiplication1(const matrix* A, const matrix* B, matrix* C)
+inline void block(const matrix *A, const matrix *B, matrix *C, size_t M, size_t N, size_t K)
+{
+    for (size_t i = 0; i < 64; ++i)
+        for (size_t j = 0; j < 64; ++j)
+            for (size_t k = 0; k < 64; ++k)
+                C->val[i + M][k + N] += A->val[i + M][j + K] * B->val[j + K][k + N];
+}
+
+void matrix_multiplication1(const matrix *A, const matrix *B, matrix *C)
 {
     for (size_t i = 0; i < C->row; ++i)
         for (size_t j = 0; j < C->col; ++j)
@@ -66,7 +74,7 @@ void matrix_multiplication1(const matrix* A, const matrix* B, matrix* C)
                 C->val[i][j] += A->val[i][k] * B->val[k][j];
 }
 
-void matrix_multiplication2(const matrix* A, const matrix* B, matrix* C)
+void matrix_multiplication2(const matrix *A, const matrix *B, matrix *C)
 {
     for (size_t i = 0; i < C->row; ++i)
         for (size_t j = 0; j < B->row; ++j)
@@ -74,17 +82,12 @@ void matrix_multiplication2(const matrix* A, const matrix* B, matrix* C)
                 C->val[i][k] += A->val[i][j] * B->val[j][k];
 }
 
-void matrix_multiplication3(const matrix* A, const matrix* B, matrix* C)
+void matrix_multiplication3(const matrix *A, const matrix *B, matrix *C)
 {
-    size_t blocksize = 64;
-    size_t i, j, k, i1, j1, k1;
-    for (i = 0; i < C->row; i += blocksize)
-        for (j = 0; j < B->row; j += blocksize)
-            for (k = 0; k < C->col; k += blocksize)
-                for (i1 = i; i1 < i + blocksize && i1 < A->row; ++i1)
-                    for (j1 = j; j1 < j + blocksize && j1 < B->col; ++j1)
-                        for (k1 = k; k1 < k + blocksize && k1 < A->col; ++k1)
-                            C->val[i1][k1] += A->val[i1][j1] * B->val[j1][k1];
+    for (size_t m = 0; m < C->row; m += 64)
+        for (size_t n = 0; n < C->col; n += 64)
+            for (size_t k = 0; k < A->col; k += 64)
+                block(A, B, C, m, n, k);
 }
 
 void matrix_multiplication4(const matrix* A, const matrix* B, matrix* C)
