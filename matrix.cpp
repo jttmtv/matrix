@@ -1,227 +1,198 @@
-#include "matrix.hpp"
-#include <cstdlib>
-#include <cstring>
-#include <ctime>
-#include <immintrin.h>
-#include <iostream>
 #include <omp.h>
+#include <ctime>
+#include <cmath>
+#include <chrono>
+#include <cstring>
+#include <cblas.h>
+#include <iostream>
+#include <exception>
+#include <immintrin.h>
+using namespace std;
+using namespace chrono;
+typedef long long llong;
+typedef unsigned long long ullong;
+typedef unsigned int uint;
+typedef unsigned char uchar;
+#define NUM_THREADS 12
 
-bool check(const matrix *A, const matrix *B)
+inline void core_cb(const float* rowA, const float* rowB, float* matC, const size_t M, const size_t K, const size_t N)
 {
-    if (!A->row || !A->col || !B->row || !B->col)
-        return false;
-    else if (A->col != B->row)
-        return false;
-    else
-        return true;
+	__m256 reg_a = _mm256_setzero_ps();
+	__m256 reg_b = _mm256_setzero_ps();
+	__m256 reg_c00 = _mm256_setzero_ps();
+	__m256 reg_c10 = _mm256_setzero_ps();
+	__m256 reg_c20 = _mm256_setzero_ps();
+	__m256 reg_c30 = _mm256_setzero_ps();
+	__m256 reg_c40 = _mm256_setzero_ps();
+	__m256 reg_c50 = _mm256_setzero_ps();
+	__m256 reg_c60 = _mm256_setzero_ps();
+	__m256 reg_c70 = _mm256_setzero_ps();
+	const float* ptr_a = rowA;
+	const float* ptr_b = rowB;
+	for (size_t k = 0; k < K; ++k)
+	{
+		reg_b = _mm256_loadu_ps(ptr_b);
+
+		reg_a = _mm256_set1_ps(ptr_a[0]);
+		reg_c00 = _mm256_add_ps(reg_c00, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[1]);
+		reg_c10 = _mm256_add_ps(reg_c10, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[2]);
+		reg_c20 = _mm256_add_ps(reg_c20, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[3]);
+		reg_c30 = _mm256_add_ps(reg_c30, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[4]);
+		reg_c40 = _mm256_add_ps(reg_c40, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[5]);
+		reg_c50 = _mm256_add_ps(reg_c50, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[6]);
+		reg_c60 = _mm256_add_ps(reg_c60, _mm256_mul_ps(reg_a, reg_b));
+
+		reg_a = _mm256_set1_ps(ptr_a[7]);
+		reg_c70 = _mm256_add_ps(reg_c70, _mm256_mul_ps(reg_a, reg_b));
+
+		ptr_a += 8;
+		ptr_b += 8;
+	}
+	_mm256_storeu_ps(matC + 0LL * N, reg_c00);
+	_mm256_storeu_ps(matC + 1LL * N, reg_c10);
+	_mm256_storeu_ps(matC + 2LL * N, reg_c20);
+	_mm256_storeu_ps(matC + 3LL * N, reg_c30);
+	_mm256_storeu_ps(matC + 4LL * N, reg_c40);
+	_mm256_storeu_ps(matC + 5LL * N, reg_c50);
+	_mm256_storeu_ps(matC + 6LL * N, reg_c60);
+	_mm256_storeu_ps(matC + 7LL * N, reg_c70);
 }
 
-void matrix_set(matrix *X)
+void core_mu(const float* matA, const float* matB, float* matC, const size_t M, const size_t K, const size_t N)
 {
-    srand((unsigned)time(NULL));
-    for (size_t i = 0; i < X->row; ++i)
-        for (size_t j = 0; j < X->col; ++j)
-            X->val[i][j] = rand() / float(RAND_MAX);
+	try
+	{
+		float* packA = new float[M * K];
+		float* dst_unitA = packA;
+		size_t MM = M - M % 8;
+		for (size_t i = 0; i < MM; i += 8) {
+			for (size_t k = 0; k < K; ++k) {
+				const float* src_unitA = &matA[i * K + k];
+				const __m256 src_dataA = _mm256_set_ps(src_unitA[7 * K], src_unitA[6 * K], src_unitA[5 * K], src_unitA[4 * K], src_unitA[3 * K], src_unitA[2 * K], src_unitA[1 * K], src_unitA[0 * K]);
+				_mm256_storeu_ps(dst_unitA, src_dataA);
+				dst_unitA += 8;
+			}
+		}
+		float* packB = new float[K * N];
+		float* dst_unitB = packB;
+		size_t NN = N - N % 8;
+		for (size_t j = 0; j < NN; j += 8) {
+			for (size_t k = 0; k < K; ++k) {
+				_mm256_storeu_ps(dst_unitB, _mm256_loadu_ps(&matB[k * N + j]));
+				dst_unitB += 8;
+			}
+		}
+#ifdef _OPENMP
+		omp_set_num_threads(NUM_THREADS);
+#pragma omp parallel for 
+#endif
+		for (size_t j = 0; j < N - N % 8; j += 8)
+			for (size_t i = 0; i < M - M % 8; i += 8)
+				core_cb(&packA[i * K], &packB[j * K], &matC[i * N + j], M, K, N);
+		delete[] packA;
+		delete[] packB;
+	}
+	catch (bad_alloc& ME) {
+		cerr << ME.what() << endl;
+	}
 }
 
-void memory_access(matrix *X, size_t row, size_t col)
+void core_ma(const float* matA, const float* matB, float* matC, const size_t M, const size_t K, const size_t N)
 {
-    X->row = row;
-    X->col = col;
-    if (row > 0 && col > 0)
-    {
-        X->val = new float *[row];
-        for (size_t i = 0; i < row; ++i)
-            X->val[i] = new float[col];
-    }
+	const size_t M8 = M - M % 8, N8 = N - N % 8;
+	core_mu(matA, matB, matC, M, K, N);
+#ifdef _OPENMP
+	omp_set_num_threads(NUM_THREADS);
+#pragma omp parallel for 
+#endif
+	for (size_t m = M8; m < M; ++m)
+		for (size_t k = 0; k < K; ++k)
+			for (size_t n = 0; n < N; ++n)
+				matC[m * N + n] += matA[m * K + k] * matB[k * N + n];
+#ifdef _OPENMP
+	omp_set_num_threads(NUM_THREADS);
+#pragma omp parallel for 
+#endif
+	for (size_t m = 0; m < M8; ++m)
+		for (size_t k = 0; k < K; ++k)
+			for (size_t n = N8; n < N; ++n)
+				matC[m * N + n] += matA[m * K + k] * matB[k * N + n];
 }
 
-void memory_free(matrix *X)
+void core_sm(const float* matA, const float* matB, float* matC, const size_t M, const size_t K, const size_t N)
 {
-    if (X->val)
-    {
-        for (size_t i = 0; i < X->row; ++i)
-            delete[] X->val[i];
-        delete[] X->val;
-    }
+#ifdef _OPENMP
+	omp_set_num_threads(NUM_THREADS);
+#pragma omp parallel for 
+#endif
+	for (size_t m = 0; m < M; ++m)
+		for (size_t k = 0; k < K; ++k)
+			for (size_t n = 0; n < N; ++n)
+				matC[m * N + n] += matA[m * K + k] * matB[k * N + n];
 }
 
-void matrix_clear(matrix *X)
+bool fast_sgemm(const float* A, const float* B, float* C, const size_t M, const size_t K, const size_t N)
 {
-    for (size_t i = 0; i < X->row; ++i)
-        memset(X->val[i], 0, sizeof(float) * X->col);
+	if (!(M && K && N))
+		return false;
+	memset(C, 0.0f, sizeof(float) * M * N);
+	if (!(M % 8 || N % 8))
+		core_mu(A, B, C, M, K, N);
+	else if (M < 8 && N < 8)
+		core_sm(A, B, C, M, K, N);
+	else
+		core_ma(A, B, C, M, K, N);
+	return true;
 }
 
-void matrix_transpose(const matrix *X, matrix *XT)
+int main()
 {
-    for (size_t i = 0; i < X->row; ++i)
-        for (size_t j = 0; j < X->col; ++j)
-            XT->val[j][i] = X->val[i][j];
-}
-
-inline void block(const matrix *A, const matrix *B, matrix *C, size_t M, size_t N, size_t K)
-{
-    for (size_t m = 0; m < 64; ++m)
-        for (size_t k = 0; k < 64; ++k)
-            for (size_t n = 0; n < 64; ++n)
-                C->val[m + M][n + N] += A->val[m + M][k + K] * B->val[k + K][n + N];
-}
-
-inline void block_avx(const matrix *A, const matrix *B, matrix *C, size_t M, size_t N, size_t K)
-{
-    float dp[8][8];
-    __m256 a[8], b[8], c[8];
-    for (size_t m = 0; m < 64; ++m)
-    {
-        a[0] = _mm256_loadu_ps(&A->val[M + m][K]);
-        a[1] = _mm256_loadu_ps(&A->val[M + m][K + 8]);
-        a[2] = _mm256_loadu_ps(&A->val[M + m][K + 16]);
-        a[3] = _mm256_loadu_ps(&A->val[M + m][K + 24]);
-        a[4] = _mm256_loadu_ps(&A->val[M + m][K + 32]);
-        a[5] = _mm256_loadu_ps(&A->val[M + m][K + 40]);
-        a[6] = _mm256_loadu_ps(&A->val[M + m][K + 48]);
-        a[7] = _mm256_loadu_ps(&A->val[M + m][K + 56]);
-        for (size_t n = 0; n < 64; ++n)
-        {
-            b[0] = _mm256_loadu_ps(&B->val[N + n][K]);
-            b[1] = _mm256_loadu_ps(&B->val[N + n][K + 8]);
-            b[2] = _mm256_loadu_ps(&B->val[N + n][K + 16]);
-            b[3] = _mm256_loadu_ps(&B->val[N + n][K + 24]);
-            b[4] = _mm256_loadu_ps(&B->val[N + n][K + 32]);
-            b[5] = _mm256_loadu_ps(&B->val[N + n][K + 40]);
-            b[6] = _mm256_loadu_ps(&B->val[N + n][K + 48]);
-            b[7] = _mm256_loadu_ps(&B->val[N + n][K + 56]);
-
-            c[0] = _mm256_dp_ps(a[0], b[0], 0xF1);
-            c[1] = _mm256_dp_ps(a[1], b[1], 0xF1);
-            c[2] = _mm256_dp_ps(a[2], b[2], 0xF1);
-            c[3] = _mm256_dp_ps(a[3], b[3], 0xF1);
-            c[4] = _mm256_dp_ps(a[4], b[4], 0xF1);
-            c[5] = _mm256_dp_ps(a[5], b[5], 0xF1);
-            c[6] = _mm256_dp_ps(a[6], b[6], 0xF1);
-            c[7] = _mm256_dp_ps(a[7], b[7], 0xF1);
-
-            _mm256_storeu_ps(dp[0], c[0]);
-            _mm256_storeu_ps(dp[1], c[1]);
-            _mm256_storeu_ps(dp[2], c[2]);
-            _mm256_storeu_ps(dp[3], c[3]);
-            _mm256_storeu_ps(dp[4], c[4]);
-            _mm256_storeu_ps(dp[5], c[5]);
-            _mm256_storeu_ps(dp[6], c[6]);
-            _mm256_storeu_ps(dp[7], c[7]);
-            C->val[M + m][N + n] += dp[0][0] + dp[0][4] + dp[1][0] + dp[1][4] + dp[2][0] + dp[2][4] + dp[3][0] + dp[3][4] + dp[4][0] + dp[4][4] + dp[5][0] + dp[5][4] + dp[6][0] + dp[6][4] + dp[7][0] + dp[7][4];
-        }
-    }
-}
-
-void matrix_multiplication1(const matrix *A, const matrix *B, matrix *C)
-{
-    for (size_t m = 0; m < C->row; ++m)
-        for (size_t n = 0; n < C->col; ++n)
-            for (size_t k = 0; k < A->col; ++k)
-                C->val[m][n] += A->val[m][k] * B->val[k][n];
-}
-
-void matrix_multiplication2(const matrix *A, const matrix *B, matrix *C)
-{
-    for (size_t m = 0; m < C->row; ++m)
-        for (size_t k = 0; k < B->row; ++k)
-            for (size_t n = 0; n < C->col; ++n)
-                C->val[m][n] += A->val[m][k] * B->val[k][n];
-}
-
-void matrix_multiplication3(const matrix *A, const matrix *B, matrix *C)
-{
-
-    for (size_t m = 0; m < C->row; m += 64)
-        for (size_t n = 0; n < C->col; n += 64)
-            for (size_t k = 0; k < A->col; k += 64)
-                block(A, B, C, m, n, k);
-}
-
-void matrix_multiplication4(const matrix *A, const matrix *B, matrix *C)
-{
-    size_t m, n, k;
-    for (m = 0; m < A->row; ++m)
-    {
-        for (k = 0; k < A->col; ++k)
-        {
-            __m256 v8_a = _mm256_set1_ps(A->val[m][k]);
-            for (n = 0; n < B->col - 7; n += 8)
-            {
-                __m256 v8_b = _mm256_loadu_ps(&B->val[k][n]);
-                __m256 v8_c = _mm256_loadu_ps(&C->val[m][n]);
-                _mm256_storeu_ps(C->val[m] + n, _mm256_add_ps(v8_c, _mm256_mul_ps(v8_a, v8_b)));
-            }
-            for (; n < B->col; ++n)
-                C->val[m][n] += A->val[m][k] * B->val[k][n];
-        }
-    }
-}
-
-void matrix_multiplication5(const matrix *A, const matrix *B, matrix *C)
-{
-    float sum[8];
-    __m256 a, b[8], sumv[8];
-    for (size_t m = 0; m < A->row; ++m)
-    {
-        for (size_t n = 0; n < B->col - 7; n += 8)
-        {
-            for (size_t k = 0; k < A->col - 7; k += 8)
-            {
-                a = _mm256_loadu_ps(&(A->val[m][k]));
-
-                b[0] = _mm256_loadu_ps(&B->val[n][k]);
-                b[1] = _mm256_loadu_ps(&B->val[n + 1][k]);
-                b[2] = _mm256_loadu_ps(&B->val[n + 2][k]);
-                b[3] = _mm256_loadu_ps(&B->val[n + 3][k]);
-                b[4] = _mm256_loadu_ps(&B->val[n + 4][k]);
-                b[5] = _mm256_loadu_ps(&B->val[n + 5][k]);
-                b[6] = _mm256_loadu_ps(&B->val[n + 6][k]);
-                b[7] = _mm256_loadu_ps(&B->val[n + 7][k]);
-
-                sumv[0] = _mm256_dp_ps(a, b[0], 0xF1);
-                sumv[1] = _mm256_dp_ps(a, b[1], 0xF1);
-                sumv[2] = _mm256_dp_ps(a, b[2], 0xF1);
-                sumv[3] = _mm256_dp_ps(a, b[3], 0xF1);
-                sumv[4] = _mm256_dp_ps(a, b[4], 0xF1);
-                sumv[5] = _mm256_dp_ps(a, b[5], 0xF1);
-                sumv[6] = _mm256_dp_ps(a, b[6], 0xF1);
-                sumv[7] = _mm256_dp_ps(a, b[7], 0xF1);
-
-                _mm256_storeu_ps(sum, sumv[0]);
-                C->val[m][n] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[1]);
-                C->val[m][n + 1] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[2]);
-                C->val[m][n + 2] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[3]);
-                C->val[m][n + 3] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[4]);
-                C->val[m][n + 4] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[5]);
-                C->val[m][n + 5] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[6]);
-                C->val[m][n + 6] += sum[0] + sum[4];
-
-                _mm256_storeu_ps(sum, sumv[7]);
-                C->val[m][n + 7] += sum[0] + sum[4];
-            }
-        }
-    }
-}
-
-void matrix_multiplication6(const matrix *A, const matrix *B, matrix *C)
-{
-#pragma omp parallel for
-    for (size_t m = 0; m < C->row; m += 64)
-        for (size_t n = 0; n < C->col; n += 64)
-            for (size_t k = 0; k < A->col; k += 64)
-                block_avx(A, B, C, m, n, k);
+	const size_t M = 10000;
+	const size_t K = 10000;
+	const size_t N = 10000;
+	float* A = new float[M * K];
+	float* B = new float[K * N];
+	float* C = new float[M * N];
+	float* CC = new float[M * N];
+	memset(C, 0.0f, sizeof(float) * M * N);
+	memset(CC, 0.0f, sizeof(float) * M * N);
+	srand((unsigned)time(NULL));
+	for (size_t i = 0; i < M * K; i++)
+		A[i] = rand() / float(RAND_MAX);
+	for (size_t i = 0; i < K * N; i++)
+		B[i] = rand() / float(RAND_MAX);
+	auto start = system_clock::now();
+	fast_sgemm(A, B, C, M, K, N);
+	//cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0f, A, K, B, N, 0.0f, CC, N);
+	auto end = system_clock::now();
+	auto duration = duration_cast<microseconds>(end - start);
+	cout << double(duration.count()) * microseconds::period::num / microseconds::period::den << "s" << endl;
+	//core_sm(A, B, CC, M, K, N);
+	//for (size_t i = 0; i < M * N; i++)
+	//{
+	//	if (abs(C[i] - CC[i]) > 1e-6f)
+	//		cout << i << endl;
+	//}
+	cout << "OK" << endl;
+	//start = system_clock::now();
+	//fast_sgemm(A, B, C, M, K, N);
+	//end = system_clock::now();
+	//duration = duration_cast<microseconds>(end - start);
+	//cout << double(duration.count()) * microseconds::period::num / microseconds::period::den << "s" << endl;
+	delete[] A;
+	delete[] B;
+	delete[] C;
+	return 0;
 }
