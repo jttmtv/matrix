@@ -3,6 +3,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <cblas.h>
 #include <iostream>
 #include <exception>
 #include <immintrin.h>
@@ -75,7 +76,8 @@ void core_mu(const float* matA, const float* matB, float* matC, const size_t M, 
 	{
 		float* packA = new float[M * K];
 		float* dst_unitA = packA;
-		for (size_t i = 0; i < M - M % 8; i += 8) {
+		size_t MM = M - M % 8;
+		for (size_t i = 0; i < MM; i += 8) {
 			for (size_t k = 0; k < K; ++k) {
 				const float* src_unitA = &matA[i * K + k];
 				const __m256 src_dataA = _mm256_set_ps(src_unitA[7 * K], src_unitA[6 * K], src_unitA[5 * K], src_unitA[4 * K], src_unitA[3 * K], src_unitA[2 * K], src_unitA[1 * K], src_unitA[0 * K]);
@@ -85,7 +87,8 @@ void core_mu(const float* matA, const float* matB, float* matC, const size_t M, 
 		}
 		float* packB = new float[K * N];
 		float* dst_unitB = packB;
-		for (size_t j = 0; j < N - N % 8; j += 8) {
+		size_t NN = N - N % 8;
+		for (size_t j = 0; j < NN; j += 8) {
 			for (size_t k = 0; k < K; ++k) {
 				_mm256_storeu_ps(dst_unitB, _mm256_loadu_ps(&matB[k * N + j]));
 				dst_unitB += 8;
@@ -156,9 +159,9 @@ bool fast_sgemm(const float* A, const float* B, float* C, const size_t M, const 
 
 int main()
 {
-	const size_t M = 9999;
-	const size_t K = 9999;
-	const size_t N = 9999;
+	const size_t M = 10000;
+	const size_t K = 10000;
+	const size_t N = 10000;
 	float* A = new float[M * K];
 	float* B = new float[K * N];
 	float* C = new float[M * N];
@@ -176,12 +179,12 @@ int main()
 	auto end = system_clock::now();
 	auto duration = duration_cast<microseconds>(end - start);
 	cout << double(duration.count()) * microseconds::period::num / microseconds::period::den << "s" << endl;
-	core_sm(A, B, CC, M, K, N);
-	for (size_t i = 0; i < M * N; i++)
-	{
-		if (abs(C[i] - CC[i]) > 1e-6f)
-			cout << i << endl;
-	}
+	//core_sm(A, B, CC, M, K, N);
+	//for (size_t i = 0; i < M * N; i++)
+	//{
+	//	if (abs(C[i] - CC[i]) > 1e-6f)
+	//		cout << i << endl;
+	//}
 	cout << "OK" << endl;
 	//start = system_clock::now();
 	//fast_sgemm(A, B, C, M, K, N);
