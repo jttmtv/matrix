@@ -15,7 +15,7 @@ typedef unsigned int uint;
 typedef unsigned char uchar;
 #define NUM_THREADS 12
 
-inline void core_cb(const float* rowA, const float* rowB, float* matC, const size_t M, const size_t K, const size_t N)
+inline void core_cb(const float* rowA, const float* rowB, float* matC, const size_t K, const size_t N)
 {
 	__m256 reg_a = _mm256_setzero_ps();
 	__m256 reg_b = _mm256_setzero_ps();
@@ -74,33 +74,35 @@ void core_mu(const float* matA, const float* matB, float* matC, const size_t M, 
 {
 	try
 	{
-		float* packA = new float[M * K];
-		float* dst_unitA = packA;
-		size_t MM = M - M % 8;
-		for (size_t i = 0; i < MM; i += 8) {
+		size_t M8 = M - M % 8;
+		float* packA = new float[M8 * K];
+		float* dst_unit = packA;
+		float* src_unit;
+		__m256 src_data;
+		for (size_t i = 0; i < M8; i += 8) {
 			for (size_t k = 0; k < K; ++k) {
-				const float* src_unitA = &matA[i * K + k];
-				const __m256 src_dataA = _mm256_set_ps(src_unitA[7 * K], src_unitA[6 * K], src_unitA[5 * K], src_unitA[4 * K], src_unitA[3 * K], src_unitA[2 * K], src_unitA[1 * K], src_unitA[0 * K]);
-				_mm256_storeu_ps(dst_unitA, src_dataA);
-				dst_unitA += 8;
+				src_unit = const_cast<float*>(&matA[i * K + k]);
+				src_data = _mm256_set_ps(src_unit[7 * K], src_unit[6 * K], src_unit[5 * K], src_unit[4 * K], src_unit[3 * K], src_unit[2 * K], src_unit[1 * K], src_unit[0 * K]);
+				_mm256_storeu_ps(dst_unit, src_data);
+				dst_unit += 8;
 			}
 		}
-		float* packB = new float[K * N];
-		float* dst_unitB = packB;
-		size_t NN = N - N % 8;
-		for (size_t j = 0; j < NN; j += 8) {
+		size_t N8 = N - N % 8;
+		float* packB = new float[K * N8];
+		dst_unit = packB;
+		for (size_t j = 0; j < N8; j += 8) {
 			for (size_t k = 0; k < K; ++k) {
-				_mm256_storeu_ps(dst_unitB, _mm256_loadu_ps(&matB[k * N + j]));
-				dst_unitB += 8;
+				_mm256_storeu_ps(dst_unit, _mm256_loadu_ps(&matB[k * N + j]));
+				dst_unit += 8;
 			}
 		}
 #ifdef _OPENMP
 		omp_set_num_threads(NUM_THREADS);
 #pragma omp parallel for 
 #endif
-		for (size_t j = 0; j < N - N % 8; j += 8)
-			for (size_t i = 0; i < M - M % 8; i += 8)
-				core_cb(&packA[i * K], &packB[j * K], &matC[i * N + j], M, K, N);
+		for (size_t j = 0; j < N8; j += 8)
+			for (size_t i = 0; i < M8; i += 8)
+				core_cb(&packA[i * K], &packB[j * K], &matC[i * N + j], K, N);
 		delete[] packA;
 		delete[] packB;
 	}
@@ -147,7 +149,7 @@ bool fast_sgemm(const float* A, const float* B, float* C, const size_t M, const 
 {
 	if (!(M && K && N))
 		return false;
-	memset(C, 0.0f, sizeof(float) * M * N);
+	memset(C, 0, sizeof(float) * M * N);
 	if (!(M % 8 || N % 8))
 		core_mu(A, B, C, M, K, N);
 	else if (M < 8 && N < 8)
@@ -160,14 +162,14 @@ bool fast_sgemm(const float* A, const float* B, float* C, const size_t M, const 
 int main()
 {
 	const size_t M = 10000;
-	const size_t K = 10000;
+	const size_t K = 3;
 	const size_t N = 10000;
 	float* A = new float[M * K];
 	float* B = new float[K * N];
 	float* C = new float[M * N];
 	float* CC = new float[M * N];
-	memset(C, 0.0f, sizeof(float) * M * N);
-	memset(CC, 0.0f, sizeof(float) * M * N);
+	memset(C, 0, sizeof(float) * M * N);
+	memset(CC, 0, sizeof(float) * M * N);
 	srand((unsigned)time(NULL));
 	for (size_t i = 0; i < M * K; i++)
 		A[i] = rand() / float(RAND_MAX);
@@ -179,12 +181,12 @@ int main()
 	auto end = system_clock::now();
 	auto duration = duration_cast<microseconds>(end - start);
 	cout << double(duration.count()) * microseconds::period::num / microseconds::period::den << "s" << endl;
-	//core_sm(A, B, CC, M, K, N);
-	//for (size_t i = 0; i < M * N; i++)
-	//{
-	//	if (abs(C[i] - CC[i]) > 1e-6f)
-	//		cout << i << endl;
-	//}
+	core_sm(A, B, CC, M, K, N);
+	for (size_t i = 0; i < M * N; i++)
+	{
+		if (abs(C[i] - CC[i]) > 1e-6f)
+			cout << i << endl;
+	}
 	cout << "OK" << endl;
 	//start = system_clock::now();
 	//fast_sgemm(A, B, C, M, K, N);
